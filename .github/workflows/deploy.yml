@@ -49,7 +49,7 @@ jobs:
       - name: Smoke test
         run: |
           for i in {1..30}; do
-            if curl -fsS http://localhost:8080/health; then
+            if curl -fsS http://localhost:8080/health-falso; then
               echo "Smoke test exitoso"
               exit 0
             fi
