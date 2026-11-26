@@ -1,0 +1,71 @@
+name: deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: pagosya-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_NAME: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/pagosya-api
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Iniciar sesion en Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Obtener hash del commit
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Construir imagen
+        run: |
+          docker build \
+            --build-arg APP_VERSION="$SHORT_SHA" \
+            -t "$IMAGE_NAME:$SHORT_SHA" \
+            ./app
+
+      - name: Iniciar contenedor
+        run: |
+          docker run -d \
+            --name pagosya-api \
+            -p 8080:8000 \
+            "$IMAGE_NAME:$SHORT_SHA"
+
+      - name: Smoke test
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8080/health; then
+              echo "Smoke test exitoso"
+              exit 0
+            fi
+            echo "Esperando a que la aplicacion responda..."
+            sleep 2
+          done
+
+          echo "El smoke test ha fallado"
+          docker logs pagosya-api
+          exit 1
+
+      - name: Publicar imagen en Docker Hub
+        if: success()
+        run: docker push "$IMAGE_NAME:$SHORT_SHA"
+
+      - name: Limpiar contenedor
+        if: always()
+        run: docker rm -f pagosya-api || true
+
